@@ -17,7 +17,7 @@ const sendDraftToFront = async (subreddit, postTitle, postUrl, aiReply) => {
           {
             author_id: "alt:reddit-bot@example.com",
             type: "comment",
-            body: `📢 **Reddit Discussion:** [${postTitle}](${postUrl})\n\n📝 **AI-Generated Response:**\n${aiReply}`
+            body: `**Reddit Discussion:** [${postTitle}](${postUrl})\n\n **AI-Generated Response:**\n${aiReply}`
           }
         ]
       },
