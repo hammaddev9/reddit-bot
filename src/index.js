@@ -1,5 +1,5 @@
 const { generateAIReply } = require("./services/aiService");
-const { fetchRelevantPosts, shouldReply, loadKeywordsAndSubreddits, keywordMatch } = require("./services/redditService");
+const { fetchRelevantPosts, shouldReply, loadKeywordsAndSubreddits } = require("./services/redditService");
 const { sendDraftToFront } = require("./services/frontAppService");
 
 const processRedditPosts = async () => {
@@ -8,26 +8,25 @@ const processRedditPosts = async () => {
   await loadKeywordsAndSubreddits();
 
   const posts = await fetchRelevantPosts(50);
-  let replyCount = 0;
 
   if (posts.length === 0) {
     console.log("No posts found. Check if subreddits exist or if Reddit API is working.");
     return;
   }
 
+  let replyCount = 0;
+
   for (const post of posts) {
     if (replyCount >= 3) break;
 
-    const postContent = `${post.title} ${post.selftext || post.body}`.toLowerCase();
-
-    const isMatch = shouldReply(postContent);
+    const isMatch = shouldReply(post);
 
     if (isMatch) {
       console.log(`Found keyword match in: "${post.title}"`);
 
-      const aiResponse = await generateAIReply(post.title, postContent);
-      if (!aiResponse) {
-        console.log("No AI-generated response available, skipping post.");
+      const aiResponse = await generateAIReply(post.title, post.selftext || post.url || "");
+      if (!aiResponse || aiResponse.trim().length < 5) {
+        console.log("AI-generated response is empty or too short, skipping post.");
         continue;
       }
 
@@ -37,7 +36,7 @@ const processRedditPosts = async () => {
 
       replyCount++;
     } else {
-      console.log(`No matching keywords for: "${post.title}"`);
+      console.log(`No keyword match for: "${post.title}"`);
     }
   }
 
