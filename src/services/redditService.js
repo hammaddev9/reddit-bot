@@ -3,7 +3,6 @@ const snoowrap = require("snoowrap");
 const stringSimilarity = require("string-similarity");
 const fs = require("fs");
 const { loadGoogleSheetsData } = require("../services/googleSheetsService");
-const { generateAIReply } = require("./aiService");
 
 const reddit = new snoowrap({
   userAgent: process.env.REDDIT_USER_AGENT,
@@ -11,18 +10,17 @@ const reddit = new snoowrap({
   clientSecret: process.env.REDDIT_CLIENT_SECRET,
   username: process.env.REDDIT_USERNAME,
   password: process.env.REDDIT_PASSWORD,
+  requestTimeout: 30000,
 });
 
 let targetKeywords = [];
 let subredditList = [];
 
-// Load stored processed posts
 const processedPostsFile = "./processedPosts.json";
 let processedPosts = fs.existsSync(processedPostsFile)
   ? JSON.parse(fs.readFileSync(processedPostsFile, "utf8"))
   : [];
 
-// 🔹 Load keywords and subreddits from Google Sheets
 async function loadKeywordsAndSubreddits() {
   try {
     const data = await loadGoogleSheetsData();
@@ -47,9 +45,8 @@ async function loadKeywordsAndSubreddits() {
   }
 }
 
-loadKeywordsAndSubreddits(); // Call on startup
+loadKeywordsAndSubreddits();
 
-// 🔹 Check if a post should be replied to based on keyword matching
 function shouldReply(post) {
   const postContent = `${post.title} ${post.selftext || ""}`.toLowerCase();
 
@@ -73,27 +70,22 @@ function shouldReply(post) {
   return false;
 }
 
-// 🔹 Improved keyword matching logic
 function findMatchingKeyword(text, keywordsList) {
-  text = text.toLowerCase().replace(/[^a-z0-9\s]/gi, "").trim().replace(/\s+/g, " "); // Normalize spaces and remove special characters
+  text = text.toLowerCase().replace(/[^a-z0-9\s]/gi, "").trim().replace(/\s+/g, " ");
   const words = text.split(/\s+/);
 
   for (let keyword of keywordsList) {
-    const regex = new RegExp(`\\b${keyword}s?\\b`, "i"); // Word boundary match with optional "s"
+    const regex = new RegExp(`\\b${keyword}s?\\b`, "i");
     if (regex.test(text)) return keyword;
   }
 
-  // 🔹 Enhanced fuzzy matching using bigrams
   const ngrams = words.map((word, i) => (i < words.length - 1 ? word + " " + words[i + 1] : word));
   const matches = stringSimilarity.findBestMatch(text, [...keywordsList, ...ngrams]);
 
-  if (matches.bestMatch.rating > 0.5) { // Lowered threshold for better matching
+  if (matches.bestMatch.rating > 0.5) {
     return matches.bestMatch.target;
   }
-
-  return null; // No match found
 }
-
 
 const fetchRelevantPosts = async (limit = 10) => {
   try {
@@ -102,6 +94,7 @@ const fetchRelevantPosts = async (limit = 10) => {
     let allPosts = [];
 
     for (const subreddit of subredditList) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
       const posts = await reddit.getSubreddit(subreddit).getNew({ limit });
 
       const newPosts = posts.filter(post => {
@@ -111,11 +104,9 @@ const fetchRelevantPosts = async (limit = 10) => {
         }
         return false;
       });
-
       if (newPosts.length > 0) {
         console.log(`✅ Found ${newPosts.length} new posts in r/${subreddit}`);
       }
-
       allPosts = [...allPosts, ...newPosts];
     }
 
@@ -126,45 +117,18 @@ const fetchRelevantPosts = async (limit = 10) => {
   }
 };
 
-// 🔹 Post AI-generated reply on Reddit
-const { sendDraftToFront } = require("../services/frontAppService"); // Import Front App integration
 
-const postRedditReply = async (post) => {
+const postRedditReply = async (post, aiResponse) => {
   try {
-    console.log(`📤 Attempting to reply to post: "${post.title}"`);
-
-    const replyText = await generateAIReply(post.title, post.selftext || "");
-    if (!replyText) {
+    if (!aiResponse) {
       console.log("⚠️ No AI-generated response available, skipping post.");
       return false;
     }
-
-    console.log(`📝 AI Reply: "${replyText}"`);
-
-    // Post reply on Reddit
-    await post.reply(replyText);
+    console.log(`📝 AI Reply: "${aiResponse}"`);
+    await post.reply(aiResponse);
     processedPosts.push(post.id);
     fs.writeFileSync(processedPostsFile, JSON.stringify(processedPosts, null, 2));
     console.log("✅ AI-generated comment posted successfully!");
-
-    // 🔹 Send Draft to Front App
-    const sentToFront = await sendDraftToFront(
-      post.subreddit.display_name,
-      post.title,
-      `https://reddit.com${post.permalink}`,
-      replyText
-    );
-
-    if (sentToFront) {
-      console.log("✅ AI response also sent to Front App.");
-    } else {
-      console.error("❌ Failed to send response to Front App.");
-    }
-
-    // 🔹 Increase delay (random between 60-120 seconds)
-    const delay = Math.floor(Math.random() * (120000 - 60000 + 1)) + 60000;
-    console.log(`⏳ Waiting ${delay / 1000} seconds before next reply...`);
-    await new Promise(resolve => setTimeout(resolve, delay));
 
     return true;
   } catch (error) {
@@ -172,13 +136,12 @@ const postRedditReply = async (post) => {
       const waitTime = Math.floor(Math.random() * (600000 - 300000 + 1)) + 300000;
       console.warn(`❌ Rate-limited! Retrying after ${waitTime / 60000} minutes...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return postRedditReply(post);
+      return postRedditReply(post, aiResponse);
     }
     console.error("❌ Error posting AI-generated comment:", error.message);
     return false;
   }
 };
-
 
 module.exports = {
   fetchRelevantPosts,

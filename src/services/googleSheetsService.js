@@ -18,7 +18,6 @@ async function getSheetData(spreadsheetId, range) {
       spreadsheetId,
       range,
     });
-
     return response.data.values ? response.data.values.flat() : [];
   } catch (error) {
     console.error("Error fetching Google Sheets data:", error.message);
